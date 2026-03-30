@@ -102,6 +102,9 @@ def resolve_vcodec(vcodec: str) -> str:
     """Validate vcodec and resolve 'auto' to best available HW encoder, fallback to libsvtav1."""
     if vcodec not in VALID_VIDEO_CODECS:
         raise ValueError(f"Invalid vcodec '{vcodec}'. Must be one of: {sorted(VALID_VIDEO_CODECS)}")
+    if vcodec == "av1":
+        logging.info(f"Got deprecated vcodec name 'av1', using 'libsvtav1' instead.")
+        return "libsvtav1"
     if vcodec != "auto":
         logging.info(f"Using video codec: {vcodec}")
         return vcodec
@@ -122,6 +125,25 @@ def get_safe_default_codec():
             "'torchcodec' is not available in your platform, falling back to 'pyav' as a default decoder"
         )
         return "pyav"
+
+
+def info_to_encoding_kwargs(info: dict) -> dict:
+    encoding_kwargs = dict()
+    if "video.fps" in info:
+        encoding_kwargs["fps"] = info["video.fps"]
+    if "video.codec" in info:
+        encoding_kwargs["vcodec"] = resolve_vcodec(info["video.codec"])
+    if "video.pix_fmt" in info:
+        encoding_kwargs["pix_fmt"] = info["video.pix_fmt"]
+    if "video.g" in info:
+        encoding_kwargs["g"] = info["video.g"]
+    if "video.crf" in info:
+        encoding_kwargs["crf"] = info["video.crf"]
+    if "video.preset" in info:
+        encoding_kwargs["preset"] = info["video.preset"]
+    if "video.options" in info:
+        encoding_kwargs["options"] = info["video.options"]
+    return encoding_kwargs
 
 
 def decode_video_frames(
@@ -400,6 +422,7 @@ def encode_video_frames(
     overwrite: bool = False,
     preset: int | None = None,
     encoder_threads: int | None = None,
+    options: dict | None = None,
 ) -> None:
     """More info on ffmpeg arguments tuning on `benchmark/video/README.md`"""
     vcodec = resolve_vcodec(vcodec)
@@ -449,6 +472,9 @@ def encode_video_frames(
                 video_options["svtav1-params"] = lp_param
         else:
             video_options["threads"] = str(encoder_threads)
+
+    if options is not None:
+        video_options.update(options)
 
     # Set logging level
     if log_level is not None:
@@ -589,6 +615,7 @@ class _CameraEncoderThread(threading.Thread):
         result_queue: queue.Queue,
         stop_event: threading.Event,
         encoder_threads: int | None = None,
+        options: dict | None = None,
     ):
         super().__init__(daemon=True)
         self.video_path = video_path
@@ -598,6 +625,7 @@ class _CameraEncoderThread(threading.Thread):
         self.g = g
         self.crf = crf
         self.preset = preset
+        self.options = options
         self.frame_queue = frame_queue
         self.result_queue = result_queue
         self.stop_event = stop_event
@@ -647,6 +675,8 @@ class _CameraEncoderThread(threading.Thread):
                                 video_options["svtav1-params"] = lp_param
                         else:
                             video_options["threads"] = str(self.encoder_threads)
+                    if self.options is not None:
+                        video_options.update(self.options)
                     Path(self.video_path).parent.mkdir(parents=True, exist_ok=True)
                     container = av.open(str(self.video_path), "w")
                     output_stream = container.add_stream(self.vcodec, self.fps, options=video_options)
@@ -720,15 +750,27 @@ class StreamingVideoEncoder:
         g: int | None = 2,
         crf: int | None = 30,
         preset: int | None = None,
+        options: dict | None = None,
         queue_maxsize: int = 30,
         encoder_threads: int | None = None,
+        per_key_encoding: dict[str, dict] | None = None,
     ):
-        self.fps = fps
-        self.vcodec = resolve_vcodec(vcodec)
-        self.pix_fmt = pix_fmt
-        self.g = g
-        self.crf = crf
-        self.preset = preset
+        # The following are default encoding settings that can be overridden
+        # on a per-video-key basis via `per_key_encoding`
+        self.default_encoding_kwargs = {
+            "fps": fps,
+            "vcodec": resolve_vcodec(vcodec),
+            "pix_fmt": pix_fmt,
+            "g": g,
+            "crf": crf,
+            "preset": preset,
+            "options": options
+        }
+        self.per_key_encoding = dict()
+        if per_key_encoding is not None:
+            for key, enc in per_key_encoding.items():
+                self.per_key_encoding[key] = info_to_encoding_kwargs(enc)
+
         self.queue_maxsize = queue_maxsize
         self.encoder_threads = encoder_threads
 
@@ -760,18 +802,19 @@ class StreamingVideoEncoder:
             temp_video_dir = Path(tempfile.mkdtemp(dir=temp_dir))
             video_path = temp_video_dir / f"{video_key.replace('/', '_')}_streaming.mp4"
 
+            key_enc = self.per_key_encoding.get(video_key, {})
+            # If specified, fps must be the same with self.fps from meta info
+            assert "fps" not in key_enc or key_enc["fps"] == self.default_encoding_kwargs["fps"], (
+                f"FPS mismatch for {video_key}: {key_enc['fps']} in per_key_encoding vs {self.default_encoding_kwargs['fps']} in default_encoding_kwargs"
+            )
+            key_enc = {**self.default_encoding_kwargs, **key_enc}  # per_key_encoding overrides defaults
             encoder_thread = _CameraEncoderThread(
                 video_path=video_path,
-                fps=self.fps,
-                vcodec=self.vcodec,
-                pix_fmt=self.pix_fmt,
-                g=self.g,
-                crf=self.crf,
-                preset=self.preset,
                 frame_queue=frame_queue,
                 result_queue=result_queue,
                 stop_event=stop_event,
                 encoder_threads=self.encoder_threads,
+                **key_enc
             )
             encoder_thread.start()
 

@@ -76,6 +76,7 @@ from lerobot.datasets.video_utils import (
     get_safe_default_codec,
     get_video_duration_in_s,
     get_video_info,
+    info_to_encoding_kwargs,
     resolve_vcodec,
 )
 from lerobot.utils.constants import HF_LEROBOT_HOME
@@ -552,12 +553,19 @@ def _encode_video_worker(
     fps: int,
     vcodec: str = "libsvtav1",
     encoder_threads: int | None = None,
+    **encoding_kwargs,
 ) -> Path:
     temp_path = Path(tempfile.mkdtemp(dir=root)) / f"{video_key}_{episode_index:03d}.mp4"
     fpath = DEFAULT_IMAGE_PATH.format(image_key=video_key, episode_index=episode_index, frame_index=0)
     img_dir = (root / fpath).parent
     encode_video_frames(
-        img_dir, temp_path, fps, vcodec=vcodec, overwrite=True, encoder_threads=encoder_threads
+        imgs_dir=img_dir, 
+        video_path=temp_path, 
+        fps=fps,
+        vcodec=vcodec, 
+        overwrite=True, 
+        encoder_threads=encoder_threads, 
+        **encoding_kwargs
     )
     shutil.rmtree(img_dir)
     return temp_path
@@ -581,6 +589,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         streaming_encoding: bool = False,
         encoder_queue_maxsize: int = 30,
         encoder_threads: int | None = None,
+        depth_map_encoding_fn: Callable | None = None,
+        depth_map_decoding_fn: Callable | None = None,
     ):
         """
         2 modes are available for instantiating this class, depending on 2 different use cases:
@@ -703,6 +713,10 @@ class LeRobotDataset(torch.utils.data.Dataset):
             encoder_threads (int | None, optional): Number of threads per encoder instance. None lets the
                 codec auto-detect (default). Lower values reduce CPU usage per encoder. Maps to 'lp' (via svtav1-params) for
                 libsvtav1 and 'threads' for h264/hevc.
+            depth_map_encoding_fn (Callable | None, optional): Optional function to encode depth maps before saving.
+                This can be used to apply transformations like log scaling or quantization.
+            depth_map_decoding_fn (Callable | None, optional): Optional function to decode depth maps after loading.
+                This should be the inverse of the encoding function provided in depth_map_encoding_fn, if any.
         """
         super().__init__()
         self.repo_id = repo_id
@@ -718,6 +732,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.episodes_since_last_encoding = 0
         self.vcodec = resolve_vcodec(vcodec)
         self._encoder_threads = encoder_threads
+        self.depth_map_encoding_fn = depth_map_encoding_fn
+        self.depth_map_decoding_fn = depth_map_decoding_fn
 
         # Unused attributes
         self.image_writer = None
@@ -767,8 +783,22 @@ class LeRobotDataset(torch.utils.data.Dataset):
             check_delta_timestamps(self.delta_timestamps, self.fps, self.tolerance_s)
             self.delta_indices = get_delta_indices(self.delta_timestamps, self.fps)
 
+        # Validate depth map features require streaming encoding
+        depth_video_keys = [
+            k for k in self.meta.video_keys
+            if self.features.get(k, {}).get("info", {}).get("video.is_depth_map", False)
+        ]
+        if depth_video_keys and not streaming_encoding:
+            raise ValueError(
+                f"Depth map video keys {depth_video_keys} require streaming_encoding=True. "
+                "The PNG-based encoding pipeline does not support depth maps due to lossy compression."
+            )
+
         # Initialize streaming encoder for resumed recording
         if streaming_encoding and len(self.meta.video_keys) > 0:
+            per_key_encoding = {}
+            for key in self.meta.video_keys:
+                per_key_encoding[key] = self.features.get(key, {}).get("info", {})
             self._streaming_encoder = StreamingVideoEncoder(
                 fps=self.meta.fps,
                 vcodec=self.vcodec,
@@ -778,6 +808,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 preset=None,
                 queue_maxsize=encoder_queue_maxsize,
                 encoder_threads=encoder_threads,
+                per_key_encoding=per_key_encoding,
             )
 
     def _close_writer(self) -> None:
@@ -1062,6 +1093,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
             video_path = self.root / self.meta.get_video_file_path(ep_idx, vid_key)
             frames = decode_video_frames(video_path, shifted_query_ts, self.tolerance_s, self.video_backend)
+            is_depth = self.features[vid_key].get("info", {}).get("video.is_depth_map", False)
+            if is_depth and self.depth_map_decoding_fn is not None:
+                frames = self.depth_map_decoding_fn(frames)
             item[vid_key] = frames.squeeze(0)
 
         return item
@@ -1206,7 +1240,11 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 )
 
             if self.features[key]["dtype"] == "video" and self._streaming_encoder is not None:
-                self._streaming_encoder.feed_frame(key, frame[key])
+                frame_data = frame[key]
+                is_depth = self.features[key].get("info", {}).get("video.is_depth_map", False)
+                if is_depth and self.depth_map_encoding_fn is not None:
+                    frame_data = self.depth_map_encoding_fn(frame_data)
+                self._streaming_encoder.feed_frame(key, frame_data)
                 self.episode_buffer[key].append(None)  # Placeholder (video keys are skipped in parquet)
             elif self.features[key]["dtype"] in ["image", "video"]:
                 img_path = self._get_image_file_path(
@@ -1306,18 +1344,26 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 # TODO(Steven): Ideally we would like to control the number of threads per encoding such that:
                 # num_cameras * num_threads = (total_cpu -1)
                 with concurrent.futures.ProcessPoolExecutor(max_workers=num_cameras) as executor:
-                    future_to_key = {
-                        executor.submit(
-                            _encode_video_worker,
-                            video_key,
-                            episode_index,
-                            self.root,
-                            self.fps,
-                            self.vcodec,
-                            self._encoder_threads,
-                        ): video_key
-                        for video_key in self.meta.video_keys
-                    }
+                    future_to_key = {}
+                    for video_key in self.meta.video_keys:
+                        encoding_kwargs = info_to_encoding_kwargs(
+                            self.features[video_key].get("info", {})
+                        )
+                        encoding_vcodec = encoding_kwargs.pop("vcodec", self.vcodec)
+                        encoding_fps = encoding_kwargs.pop("fps", self.fps)
+                        assert encoding_fps == self.fps, f"Encoding fps {encoding_fps} must match dataset fps {self.fps}"
+                        future_to_key[
+                            executor.submit(
+                                _encode_video_worker,
+                                video_key=video_key,
+                                episode_index=episode_index,
+                                root=self.root,
+                                fps=encoding_fps,
+                                vcodec=encoding_vcodec,
+                                encoder_threads=self._encoder_threads,
+                                **encoding_kwargs,
+                            )
+                        ] = video_key
 
                     results = {}
                     for future in concurrent.futures.as_completed(future_to_key):
@@ -1634,8 +1680,12 @@ class LeRobotDataset(torch.utils.data.Dataset):
         Note: `encode_video_frames` is a blocking call. Making it asynchronous shouldn't speedup encoding,
         since video encoding with ffmpeg is already using multithreading.
         """
+        encoding_kwargs = info_to_encoding_kwargs(self.features[video_key].get("info", {}))
+        encoding_vcodec = encoding_kwargs.pop("vcodec", self.vcodec)
+        encoding_fps = encoding_kwargs.pop("fps", self.fps)
+        assert encoding_fps == self.fps, f"Encoding fps {encoding_fps} must match dataset fps {self.fps}"
         return _encode_video_worker(
-            video_key, episode_index, self.root, self.fps, self.vcodec, self._encoder_threads
+            video_key, episode_index, self.root, encoding_fps, encoding_vcodec, self._encoder_threads, **encoding_kwargs
         )
 
     @classmethod
@@ -1657,6 +1707,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         streaming_encoding: bool = False,
         encoder_queue_maxsize: int = 30,
         encoder_threads: int | None = None,
+        depth_map_encoding_fn: Callable | None = None,
+        depth_map_decoding_fn: Callable | None = None,
     ) -> "LeRobotDataset":
         """Create a LeRobot Dataset from scratch in order to record data."""
         vcodec = resolve_vcodec(vcodec)
@@ -1670,6 +1722,15 @@ class LeRobotDataset(torch.utils.data.Dataset):
             use_videos=use_videos,
             metadata_buffer_size=metadata_buffer_size,
         )
+        depth_video_keys = [
+            k for k in obj.meta.video_keys
+            if features.get(k, {}).get("info", {}).get("video.is_depth_map", False)
+        ]
+        if depth_video_keys and not streaming_encoding:
+            raise ValueError(
+                f"Depth map video keys {depth_video_keys} require streaming_encoding=True. "
+                "The PNG-based encoding pipeline does not support depth maps due to lossy compression."
+            )
         obj.repo_id = obj.meta.repo_id
         obj.root = obj.meta.root
         obj.revision = None
@@ -1679,6 +1740,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         obj.episodes_since_last_encoding = 0
         obj.vcodec = vcodec
         obj._encoder_threads = encoder_threads
+        obj.depth_map_encoding_fn = depth_map_encoding_fn
+        obj.depth_map_decoding_fn = depth_map_decoding_fn
 
         if image_writer_processes or image_writer_threads:
             obj.start_image_writer(image_writer_processes, image_writer_threads)
@@ -1703,6 +1766,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
         # Initialize streaming encoder
         if streaming_encoding and len(obj.meta.video_keys) > 0:
+            per_key_encoding = {}
+            for key in obj.meta.video_keys:
+                per_key_encoding[key] = features.get(key, {}).get("info", {})
             obj._streaming_encoder = StreamingVideoEncoder(
                 fps=fps,
                 vcodec=vcodec,
@@ -1712,6 +1778,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 preset=None,
                 queue_maxsize=encoder_queue_maxsize,
                 encoder_threads=encoder_threads,
+                per_key_encoding=per_key_encoding,
             )
         else:
             obj._streaming_encoder = None
@@ -1736,6 +1803,8 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
         tolerances_s: dict | None = None,
         download_videos: bool = True,
         video_backend: str | None = None,
+        depth_map_encoding_fn: Callable | None = None,
+        depth_map_decoding_fn: Callable | None = None,
     ):
         super().__init__()
         self.repo_ids = repo_ids
@@ -1753,6 +1822,8 @@ class MultiLeRobotDataset(torch.utils.data.Dataset):
                 tolerance_s=self.tolerances_s[repo_id],
                 download_videos=download_videos,
                 video_backend=video_backend,
+                depth_map_encoding_fn=depth_map_encoding_fn,
+                depth_map_decoding_fn=depth_map_decoding_fn,
             )
             for repo_id in repo_ids
         ]
