@@ -86,10 +86,14 @@ def decode_video_frames(
     if backend == "torchcodec":
         return decode_video_frames_torchcodec(video_path, timestamps, tolerance_s, return_uint8=return_uint8)
     elif backend == "pyav":
-        return decode_video_frames_pyav(video_path, timestamps, tolerance_s, return_uint8=return_uint8)
+        return decode_video_frames_pyav(
+            video_path, timestamps, tolerance_s, return_uint8=return_uint8, is_depth=is_depth
+        )
     elif backend == "video_reader":
         logger.warning("backend='video_reader' is deprecated and now aliases to 'pyav'.")
-        return decode_video_frames_pyav(video_path, timestamps, tolerance_s, return_uint8=return_uint8)
+        return decode_video_frames_pyav(
+            video_path, timestamps, tolerance_s, return_uint8=return_uint8, is_depth=is_depth
+        )
     else:
         raise ValueError(f"Unsupported video backend: {backend}")
 
@@ -119,8 +123,8 @@ def decode_video_frames_pyav(
         tolerance_s: Allowed deviation in seconds between a queried timestamp and the closest
             decoded frame.
         log_loaded_timestamps: When True, log every decoded frame's timestamp at INFO level.
-        return_uint8: When True, return raw uint8 frames (C, H, W). Otherwise, return float32 in
-            [0, 1] range.
+        return_uint8: When True, return raw uint8 frames (C, H, W). Otherwise, return float32 (in
+            [0, 1] range for rgb).
 
     Returns:
         torch.Tensor of shape (len(timestamps), C, H, W).
@@ -199,7 +203,7 @@ def decode_video_frames_pyav(
             f"number of queried timestamps ({len(timestamps)})"
         )
 
-    if return_uint8:
+    if return_uint8 or is_depth:
         return closest_frames
 
     # convert to the pytorch format which is float32 in [0,1] range (and channel first)

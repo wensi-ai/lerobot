@@ -266,6 +266,7 @@ class DatasetReader:
                     depth_max=depth_encoder.depth_max,
                     shift=depth_encoder.shift,
                     use_log=depth_encoder.use_log,
+                    output_unit=depth_encoder.output_unit,
                     output_tensor=True,
                 )
             return vid_key, frames.squeeze(0)

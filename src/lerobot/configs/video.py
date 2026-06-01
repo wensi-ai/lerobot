@@ -19,8 +19,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field, fields
-from typing import Any, ClassVar
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Literal
 
 from lerobot.utils.import_utils import require_package
 
@@ -61,10 +61,13 @@ DEFAULT_DEPTH_MIN: float = 0.01
 DEFAULT_DEPTH_MAX: float = 10.0
 DEFAULT_DEPTH_SHIFT: float = 3.5
 DEFAULT_DEPTH_USE_LOG: bool = True
+DEFAULT_DEPTH_OUTPUT_UNIT: Literal["m", "mm"] = "mm"
 DEFAULT_DEPTH_PIX_FMT: str = "gray12le"
 
 # Depth-specific tuning fields persisted under ``features[*]["info"]`` as ``video.<name>``.
-DEPTH_ENCODER_INFO_FIELD_NAMES: frozenset[str] = frozenset({"depth_min", "depth_max", "shift", "use_log"})
+DEPTH_ENCODER_INFO_FIELD_NAMES: frozenset[str] = frozenset(
+    {"depth_min", "depth_max", "shift", "use_log", "output_unit"}
+)
 
 
 @dataclass
@@ -278,6 +281,7 @@ class DepthEncoderConfig(VideoEncoderConfig):
         shift: Pre-log offset for numerical stability near zero.
         use_log: ``True`` for logarithmic quantization (default; matches
             sensor error profile), ``False`` for linear.
+        output_unit: Unit returned by dataset readers after dequantization.
     """
 
     vcodec: str = "hevc"
@@ -287,22 +291,34 @@ class DepthEncoderConfig(VideoEncoderConfig):
     depth_max: float = DEFAULT_DEPTH_MAX
     shift: float = DEFAULT_DEPTH_SHIFT
     use_log: bool = DEFAULT_DEPTH_USE_LOG
+    output_unit: Literal["m", "mm"] = DEFAULT_DEPTH_OUTPUT_UNIT
 
     _DEFAULT_CHANNELS: ClassVar[int] = 1
 
+    def validate(self) -> None:
+        super().validate()
+        if self.output_unit not in ("m", "mm"):
+            raise ValueError(f"output_unit must be 'm' or 'mm', got {self.output_unit!r}")
+
     @classmethod
     def from_video_info(cls, video_info: dict | None) -> DepthEncoderConfig:
-        """Reconstruct a :class:`DepthEncoderConfig` from a depth feature's ``info`` block.
-
-        Reuses :meth:`VideoEncoderConfig.from_video_info` for the base
-        codec/tuning fields and then layers the depth-specific tuning
-        (``depth_min`` / ``depth_max`` / ``shift`` / ``use_log``) on top.
-        Missing keys fall back to the class defaults.
-        """
-        base = VideoEncoderConfig.from_video_info(video_info)
-        kwargs: dict[str, Any] = {f.name: getattr(base, f.name) for f in fields(base) if f.init}
-
+        """Reconstruct depth encoder config from a feature info block."""
         video_info = video_info or {}
+        kwargs: dict[str, Any] = {}
+
+        for src_key, dst_field in (("video.codec", "vcodec"), ("video.pix_fmt", "pix_fmt")):
+            value = video_info.get(src_key)
+            if value is not None:
+                kwargs[dst_field] = value
+
+        for field_name in VIDEO_ENCODER_INFO_FIELD_NAMES:
+            value = video_info.get(f"video.{field_name}")
+            if value is None:
+                continue
+            if field_name == "extra_options" and not value:
+                continue
+            kwargs[field_name] = value
+
         for name in DEPTH_ENCODER_INFO_FIELD_NAMES:
             value = video_info.get(f"video.{name}")
             if value is not None:
