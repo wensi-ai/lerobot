@@ -36,7 +36,7 @@ import pyarrow.parquet as pq
 import torch
 from tqdm import tqdm
 
-from lerobot.configs import VideoEncoderConfig, camera_encoder_defaults
+from lerobot.configs.video import VideoEncoderConfig, camera_encoder_defaults
 from lerobot.utils.constants import ACTION, HF_LEROBOT_HOME, OBS_IMAGE, OBS_STATE
 from lerobot.utils.utils import flatten_dict
 

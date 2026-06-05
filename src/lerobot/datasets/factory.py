@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import annotations
+
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,19 +17,21 @@
 # limitations under the License.
 import logging
 from pprint import pformat
+from typing import TYPE_CHECKING
 
 import torch
 
-from lerobot.configs import PreTrainedConfig
-from lerobot.configs.rewards import RewardModelConfig
-from lerobot.configs.train import TrainPipelineConfig
-from lerobot.transforms import ImageTransforms
 from lerobot.utils.constants import ACTION, IMAGENET_STATS, OBS_PREFIX, REWARD
 
 from .dataset_metadata import LeRobotDatasetMetadata
 from .lerobot_dataset import LeRobotDataset
 from .multi_dataset import MultiLeRobotDataset
 from .streaming_dataset import StreamingLeRobotDataset
+
+if TYPE_CHECKING:
+    from lerobot.configs.policies import PreTrainedConfig
+    from lerobot.configs.rewards import RewardModelConfig
+    from lerobot.configs.train import TrainPipelineConfig
 
 
 def resolve_delta_timestamps(
@@ -77,9 +81,11 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
     Returns:
         LeRobotDataset | MultiLeRobotDataset
     """
-    image_transforms = (
-        ImageTransforms(cfg.dataset.image_transforms) if cfg.dataset.image_transforms.enable else None
-    )
+    image_transforms = None
+    if cfg.dataset.image_transforms.enable:
+        from lerobot.transforms import ImageTransforms
+
+        image_transforms = ImageTransforms(cfg.dataset.image_transforms)
 
     if isinstance(cfg.dataset.repo_id, str):
         ds_meta = LeRobotDatasetMetadata(

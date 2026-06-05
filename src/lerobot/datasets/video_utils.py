@@ -36,7 +36,7 @@ import torch
 from datasets.features.features import register_feature
 from PIL import Image
 
-from lerobot.configs import (
+from lerobot.configs.video import (
     DepthEncoderConfig,
     VideoEncoderConfig,
     camera_encoder_defaults,
@@ -77,7 +77,7 @@ def decode_video_frames(
     Currently supports torchcodec on cpu and pyav.
     """
     if backend != "pyav" and is_depth:
-        logger.warning("Decoding depth maps is only supported with the 'pyav' backend.")
+        logger.info("Decoding depth maps is only supported with the 'pyav' backend.")
         # We do not actually return uint8 here, but we avoid the 255 normalization step.
         return decode_video_frames_pyav(video_path, timestamps, tolerance_s, return_uint8=True, is_depth=True)
 

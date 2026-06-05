@@ -24,12 +24,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from huggingface_hub import snapshot_download
 
-from lerobot.configs import VideoEncoderConfig
+from lerobot.configs.video import VideoEncoderConfig
 from lerobot.utils.constants import DEFAULT_FEATURES, HF_LEROBOT_HOME, HF_LEROBOT_HUB_CACHE
 from lerobot.utils.feature_utils import _validate_feature_names
 from lerobot.utils.utils import flatten_dict
 
-from .compute_stats import aggregate_stats
 from .feature_utils import create_empty_dataset_info
 from .io_utils import (
     get_file_size_in_mb,
@@ -551,7 +550,12 @@ class LeRobotDatasetMetadata:
 
         write_info(self.info, self.root)
 
-        self.stats = aggregate_stats([self.stats, episode_stats]) if self.stats is not None else episode_stats
+        if self.stats is not None:
+            from .compute_stats import aggregate_stats
+
+            self.stats = aggregate_stats([self.stats, episode_stats])
+        else:
+            self.stats = episode_stats
         write_stats(self.stats, self.root)
 
     def update_video_info(

@@ -24,12 +24,11 @@ import torch.utils
 from huggingface_hub import HfApi, snapshot_download
 from huggingface_hub.errors import RevisionNotFoundError
 
-from lerobot.configs import DepthEncoderConfig, VideoEncoderConfig
+from lerobot.configs.video import DepthEncoderConfig, VideoEncoderConfig
 from lerobot.utils.constants import HF_LEROBOT_HUB_CACHE
 
 from .dataset_metadata import CODEBASE_VERSION, LeRobotDatasetMetadata
 from .dataset_reader import DatasetReader
-from .dataset_writer import DatasetWriter
 from .utils import (
     create_lerobot_dataset_card,
     get_safe_version,
@@ -281,6 +280,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
                     encoder_queue_maxsize,
                     encoder_threads,
                 )
+            from .dataset_writer import DatasetWriter
+
             self.writer = DatasetWriter(
                 meta=self.meta,
                 root=self.root,
@@ -733,6 +734,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
             streaming_enc = cls._build_streaming_encoder(
                 fps, camera_encoder, depth_encoder, encoder_queue_maxsize, encoder_threads
             )
+        from .dataset_writer import DatasetWriter
+
         obj.writer = DatasetWriter(
             meta=obj.meta,
             root=obj.root,
@@ -841,6 +844,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
             streaming_enc = cls._build_streaming_encoder(
                 obj.meta.fps, camera_encoder, depth_encoder, encoder_queue_maxsize, encoder_threads
             )
+        from .dataset_writer import DatasetWriter
+
         obj.writer = DatasetWriter(
             meta=obj.meta,
             root=obj.root,

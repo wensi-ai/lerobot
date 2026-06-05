@@ -24,7 +24,7 @@ import datasets
 import pandas as pd
 import tqdm
 
-from lerobot.configs import VIDEO_ENCODER_INFO_KEYS
+from lerobot.configs.video import VIDEO_ENCODER_INFO_KEYS
 
 from .compute_stats import aggregate_stats
 from .dataset_metadata import LeRobotDatasetMetadata

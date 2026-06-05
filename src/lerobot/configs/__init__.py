@@ -21,24 +21,7 @@ are intentionally NOT re-exported here to avoid circular dependencies
 Import them directly: ``from lerobot.configs.train import TrainPipelineConfig``
 """
 
-from .dataset import DatasetRecordConfig
-from .default import DatasetConfig, EvalConfig, PeftConfig, WandBConfig
-from .policies import PreTrainedConfig
-from .types import (
-    FeatureType,
-    NormalizationMode,
-    PipelineFeatureType,
-    PolicyFeature,
-    RTCAttentionSchedule,
-)
-from .video import (
-    VALID_VIDEO_CODECS,
-    VIDEO_ENCODER_INFO_KEYS,
-    DepthEncoderConfig,
-    VideoEncoderConfig,
-    camera_encoder_defaults,
-    depth_encoder_defaults,
-)
+from importlib import import_module
 
 __all__ = [
     # Types
@@ -63,3 +46,33 @@ __all__ = [
     "VALID_VIDEO_CODECS",
     "VIDEO_ENCODER_INFO_KEYS",
 ]
+
+_LAZY_EXPORTS = {
+    "DatasetRecordConfig": ".dataset",
+    "DatasetConfig": ".default",
+    "EvalConfig": ".default",
+    "PeftConfig": ".default",
+    "WandBConfig": ".default",
+    "PreTrainedConfig": ".policies",
+    "FeatureType": ".types",
+    "NormalizationMode": ".types",
+    "PipelineFeatureType": ".types",
+    "PolicyFeature": ".types",
+    "RTCAttentionSchedule": ".types",
+    "VALID_VIDEO_CODECS": ".video",
+    "VIDEO_ENCODER_INFO_KEYS": ".video",
+    "DepthEncoderConfig": ".video",
+    "VideoEncoderConfig": ".video",
+    "camera_encoder_defaults": ".video",
+    "depth_encoder_defaults": ".video",
+}
+
+
+def __getattr__(name: str) -> object:
+    if name not in _LAZY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module = import_module(_LAZY_EXPORTS[name], __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

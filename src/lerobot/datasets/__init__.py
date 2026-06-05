@@ -20,32 +20,6 @@ from lerobot.utils.import_utils import require_package
 require_package("datasets", extra="dataset")
 require_package("av", extra="dataset")
 
-from .aggregate import aggregate_datasets
-from .compute_stats import DEFAULT_QUANTILES, aggregate_stats, get_feature_stats
-from .dataset_metadata import CODEBASE_VERSION, LeRobotDatasetMetadata
-from .dataset_tools import (
-    add_features,
-    convert_image_to_video_dataset,
-    delete_episodes,
-    merge_datasets,
-    modify_features,
-    modify_tasks,
-    recompute_stats,
-    remove_feature,
-    split_dataset,
-)
-from .factory import make_dataset, resolve_delta_timestamps
-from .image_writer import safe_stop_image_writer
-from .io_utils import load_episodes, write_stats
-from .lerobot_dataset import LeRobotDataset
-from .multi_dataset import MultiLeRobotDataset
-from .pipeline_features import aggregate_pipeline_dataset_features, create_initial_features
-from .pyav_utils import check_video_encoder_parameters_pyav, detect_available_encoders_pyav
-from .sampler import EpisodeAwareSampler
-from .streaming_dataset import StreamingLeRobotDataset
-from .utils import DEFAULT_EPISODES_PATH, create_lerobot_dataset_card
-from .video_utils import VideoEncodingManager
-
 # NOTE: Low-level I/O functions (cast_stats_to_numpy, get_parquet_file_size_in_mb, etc.)
 # and legacy migration constants are intentionally NOT re-exported here.
 # Import directly: ``from lerobot.datasets.io_utils import ...``
@@ -83,3 +57,49 @@ __all__ = [
     "split_dataset",
     "write_stats",
 ]
+
+_LAZY_EXPORTS = {
+    "CODEBASE_VERSION": ".dataset_metadata",
+    "DEFAULT_EPISODES_PATH": ".utils",
+    "DEFAULT_QUANTILES": ".compute_stats",
+    "EpisodeAwareSampler": ".sampler",
+    "LeRobotDataset": ".lerobot_dataset",
+    "LeRobotDatasetMetadata": ".dataset_metadata",
+    "MultiLeRobotDataset": ".multi_dataset",
+    "StreamingLeRobotDataset": ".streaming_dataset",
+    "VideoEncodingManager": ".video_utils",
+    "check_video_encoder_parameters_pyav": ".pyav_utils",
+    "detect_available_encoders_pyav": ".pyav_utils",
+    "add_features": ".dataset_tools",
+    "aggregate_datasets": ".aggregate",
+    "aggregate_pipeline_dataset_features": ".pipeline_features",
+    "aggregate_stats": ".compute_stats",
+    "convert_image_to_video_dataset": ".dataset_tools",
+    "create_initial_features": ".pipeline_features",
+    "create_lerobot_dataset_card": ".utils",
+    "delete_episodes": ".dataset_tools",
+    "get_feature_stats": ".compute_stats",
+    "load_episodes": ".io_utils",
+    "make_dataset": ".factory",
+    "merge_datasets": ".dataset_tools",
+    "modify_features": ".dataset_tools",
+    "modify_tasks": ".dataset_tools",
+    "recompute_stats": ".dataset_tools",
+    "remove_feature": ".dataset_tools",
+    "resolve_delta_timestamps": ".factory",
+    "safe_stop_image_writer": ".image_writer",
+    "split_dataset": ".dataset_tools",
+    "write_stats": ".io_utils",
+}
+
+
+def __getattr__(name: str):
+    if name not in _LAZY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    from importlib import import_module
+
+    module = import_module(_LAZY_EXPORTS[name], __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value

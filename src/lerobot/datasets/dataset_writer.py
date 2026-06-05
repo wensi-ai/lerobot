@@ -31,7 +31,7 @@ import PIL.Image
 import pyarrow.parquet as pq
 import torch
 
-from lerobot.configs import (
+from lerobot.configs.video import (
     DepthEncoderConfig,
     VideoEncoderConfig,
     camera_encoder_defaults,

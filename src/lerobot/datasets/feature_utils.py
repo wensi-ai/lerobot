@@ -19,7 +19,7 @@ import datasets
 import numpy as np
 from PIL import Image as PILImage
 
-from lerobot.configs import VIDEO_ENCODER_INFO_KEYS
+from lerobot.configs.video import VIDEO_ENCODER_INFO_KEYS
 from lerobot.utils.constants import DEFAULT_FEATURES
 from lerobot.utils.utils import is_valid_numpy_dtype_string
 
