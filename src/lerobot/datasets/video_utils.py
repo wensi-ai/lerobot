@@ -754,8 +754,7 @@ class StreamingVideoEncoder:
 
         A copy of the image is made before enqueueing to prevent race conditions
         with camera drivers that may reuse buffers. If the encoder queue is full
-        (encoder can't keep up), the frame is dropped with a warning instead of
-        crashing the recording session.
+        (encoder can't keep up), this method blocks until the encoder catches up.
 
         Args:
             video_key: The video feature key
@@ -767,28 +766,28 @@ class StreamingVideoEncoder:
         if not self._episode_active:
             raise RuntimeError("No active episode. Call start_episode() first.")
 
-        thread = self._threads[video_key]
-        if not thread.is_alive():
-            # Check for error
-            try:
-                status, msg = self._result_queues[video_key].get_nowait()
-                if status == "error":
-                    raise RuntimeError(f"Encoder thread for {video_key} crashed: {msg}")
-            except queue.Empty:
-                pass
-            raise RuntimeError(f"Encoder thread for {video_key} is not alive")
+        frame = image.copy()
+        logged_backpressure = False
 
-        try:
-            self._frame_queues[video_key].put(image.copy(), timeout=0.1)
-        except queue.Full:
-            self._dropped_frames[video_key] = self._dropped_frames.get(video_key, 0) + 1
-            count = self._dropped_frames[video_key]
-            # Log periodically to avoid spam (1st, then every 10th)
-            if count == 1 or count % 10 == 0:
-                logger.warning(
-                    f"Encoder queue full for {video_key}, dropped {count} frame(s). "
-                    f"Consider using vcodec='auto' for hardware encoding or increasing encoder_queue_maxsize."
-                )
+        while True:
+            thread = self._threads[video_key]
+            if not thread.is_alive():
+                # Check for error
+                try:
+                    status, msg = self._result_queues[video_key].get_nowait()
+                    if status == "error":
+                        raise RuntimeError(f"Encoder thread for {video_key} crashed: {msg}")
+                except queue.Empty:
+                    pass
+                raise RuntimeError(f"Encoder thread for {video_key} is not alive")
+
+            try:
+                self._frame_queues[video_key].put(frame, timeout=1.0)
+                return
+            except queue.Full:
+                if not logged_backpressure:
+                    logger.warning(f"Encoder queue full for {video_key}; waiting for encoder to catch up.")
+                    logged_backpressure = True
 
     def finish_episode(self) -> dict[str, tuple[Path, dict | None]]:
         """Finish encoding the current episode.
