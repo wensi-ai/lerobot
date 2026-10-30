@@ -28,7 +28,6 @@ from datasets import Dataset
 from datasets.table import embed_table_storage
 from numpy.typing import DTypeLike
 from PIL import Image as PILImage
-from torchvision import transforms
 
 from lerobot.utils.io_utils import load_json, write_json
 from lerobot.utils.utils import SuppressProgressBars, flatten_dict, unflatten_dict
@@ -261,6 +260,8 @@ def pil_to_chw_tensor(img: PILImage.Image) -> torch.Tensor:
     """
     if img.mode in UINT16_PIL_MODES:
         return torch.from_numpy(np.array(img, dtype=np.float32))[None, ...]
+    from torchvision import transforms
+
     return transforms.ToTensor()(img)
 
 

@@ -414,8 +414,8 @@ class TestStreamingVideoEncoder:
         assert encoder._encoder_threads is None
         encoder.close()
 
-    def test_graceful_frame_dropping(self, tmp_path):
-        """Test that full queue drops frames instead of crashing."""
+    def test_backpressure_preserves_frames(self, tmp_path):
+        """A small encoder queue must preserve every submitted frame."""
         video_keys = [f"{OBS_IMAGES}.cam"]
         encoder = StreamingVideoEncoder(
             fps=30,
@@ -426,23 +426,20 @@ class TestStreamingVideoEncoder:
         )
         encoder.start_episode(video_keys, tmp_path)
 
-        # Feed many frames quickly - with queue_maxsize=1, some will be dropped
         num_frames = 50
         for _ in range(num_frames):
             frame = np.random.randint(0, 255, (64, 96, 3), dtype=np.uint8)
             encoder.feed_frame(f"{OBS_IMAGES}.cam", frame)
 
-        # Should not raise - frames are dropped gracefully
         results = encoder.finish_episode()
         assert f"{OBS_IMAGES}.cam" in results
 
         mp4_path, _ = results[f"{OBS_IMAGES}.cam"]
         assert mp4_path.exists()
 
-        # Some frames should have been dropped (queue was tiny)
-        dropped = encoder._dropped_frames.get(f"{OBS_IMAGES}.cam", 0)
-        # We can't guarantee drops but can verify no crash occurred
-        assert dropped >= 0
+        with av.open(str(mp4_path)) as container:
+            assert sum(1 for _ in container.decode(video=0)) == num_frames
+        assert encoder._dropped_frames.get(f"{OBS_IMAGES}.cam", 0) == 0
 
         encoder.close()
 

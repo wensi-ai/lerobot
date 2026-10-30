@@ -21,31 +21,35 @@ are intentionally NOT re-exported here to avoid circular dependencies
 Import them directly: ``from lerobot.configs.train import TrainPipelineConfig``
 """
 
-from .dataset import DatasetRecordConfig
-from .default import DatasetConfig, EMAConfig, EvalConfig, JobConfig, PeftConfig, TrackioConfig
-from .policies import PreTrainedConfig
-from .types import (
-    FeatureType,
-    NormalizationMode,
-    PipelineFeatureType,
-    PolicyFeature,
-    RTCAttentionSchedule,
-)
-from .video import (
-    DEFAULT_DEPTH_UNIT,
-    DEPTH_METER_UNIT,
-    DEPTH_MILLIMETER_UNIT,
-    VALID_VIDEO_CODECS,
-    VIDEO_ENCODER_INFO_KEYS,
-    DepthEncoderConfig,
-    RGBEncoderConfig,
-    VideoEncoderConfig,
-    depth_encoder_defaults,
-    encoder_config_from_video_info,
-    infer_depth_unit,
-    is_depth_map,
-    rgb_encoder_defaults,
-)
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .dataset import DatasetRecordConfig
+    from .default import DatasetConfig, EMAConfig, EvalConfig, JobConfig, PeftConfig, TrackioConfig
+    from .policies import PreTrainedConfig
+    from .types import (
+        FeatureType,
+        NormalizationMode,
+        PipelineFeatureType,
+        PolicyFeature,
+        RTCAttentionSchedule,
+    )
+    from .video import (
+        DEFAULT_DEPTH_UNIT,
+        DEPTH_METER_UNIT,
+        DEPTH_MILLIMETER_UNIT,
+        VALID_VIDEO_CODECS,
+        VIDEO_ENCODER_INFO_KEYS,
+        DepthEncoderConfig,
+        RGBEncoderConfig,
+        VideoEncoderConfig,
+        depth_encoder_defaults,
+        encoder_config_from_video_info,
+        infer_depth_unit,
+        is_depth_map,
+        rgb_encoder_defaults,
+    )
 
 __all__ = [
     # Types
@@ -80,3 +84,42 @@ __all__ = [
     "VALID_VIDEO_CODECS",
     "VIDEO_ENCODER_INFO_KEYS",
 ]
+
+
+_LAZY_EXPORTS = {
+    "DatasetRecordConfig": ".dataset",
+    "DatasetConfig": ".default",
+    "EMAConfig": ".default",
+    "EvalConfig": ".default",
+    "JobConfig": ".default",
+    "PeftConfig": ".default",
+    "TrackioConfig": ".default",
+    "PreTrainedConfig": ".policies",
+    "FeatureType": ".types",
+    "NormalizationMode": ".types",
+    "PipelineFeatureType": ".types",
+    "PolicyFeature": ".types",
+    "RTCAttentionSchedule": ".types",
+    "DEFAULT_DEPTH_UNIT": ".video",
+    "DEPTH_METER_UNIT": ".video",
+    "DEPTH_MILLIMETER_UNIT": ".video",
+    "VALID_VIDEO_CODECS": ".video",
+    "VIDEO_ENCODER_INFO_KEYS": ".video",
+    "DepthEncoderConfig": ".video",
+    "RGBEncoderConfig": ".video",
+    "VideoEncoderConfig": ".video",
+    "depth_encoder_defaults": ".video",
+    "encoder_config_from_video_info": ".video",
+    "infer_depth_unit": ".video",
+    "is_depth_map": ".video",
+    "rgb_encoder_defaults": ".video",
+}
+
+
+def __getattr__(name: str):
+    if name not in _LAZY_EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    value = getattr(import_module(_LAZY_EXPORTS[name], __name__), name)
+    globals()[name] = value
+    return value

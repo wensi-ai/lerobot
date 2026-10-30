@@ -219,6 +219,8 @@ class DatasetInfo:
     # Optional metadata
     robot_type: str | None = None
     splits: dict[str, str] = field(default_factory=dict)
+    cam_intrinsics: dict | None = None
+    omnigibson_git_hash: str | None = None
     # OpenAI-style tool schemas declared by the dataset. ``None`` means the
     # dataset doesn't declare any — readers fall back to ``DEFAULT_TOOLS``.
     tools: list[dict] | None = None

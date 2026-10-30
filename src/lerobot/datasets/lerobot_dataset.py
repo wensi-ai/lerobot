@@ -13,11 +13,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import contextlib
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast, overload
+from typing import TYPE_CHECKING, Any, cast, overload
 
 import datasets
 import torch
@@ -31,7 +33,6 @@ from lerobot.utils.import_utils import get_safe_default_video_backend
 
 from .dataset_metadata import CODEBASE_VERSION, LeRobotDatasetMetadata
 from .dataset_reader import BaseDatasetReader, DatasetReader
-from .dataset_writer import DatasetWriter
 from .storage import (
     DEFAULT_STORAGE_FORMAT,
     dataset_location,
@@ -45,6 +46,9 @@ from .utils import (
     is_valid_version,
 )
 from .video_utils import StreamingVideoEncoder
+
+if TYPE_CHECKING:
+    from .dataset_writer import DatasetWriter
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +366,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
                     encoder_queue_maxsize,
                     encoder_threads,
                 )
+            from .dataset_writer import DatasetWriter
+
             self.writer = DatasetWriter(
                 meta=self.meta,
                 root=self.root,
@@ -789,7 +795,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         encoder_threads: int | None = None,
         video_files_size_in_mb: int | None = None,
         data_files_size_in_mb: int | None = None,
-    ) -> "LeRobotDataset":
+    ) -> LeRobotDataset:
         """Create a new LeRobotDataset from scratch for recording data.
 
         Returns a write-mode dataset with an active :class:`DatasetWriter`. Use
@@ -864,6 +870,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
             streaming_enc = cls._build_streaming_encoder(
                 fps, rgb_encoder, depth_encoder, encoder_queue_maxsize, encoder_threads
             )
+        from .dataset_writer import DatasetWriter
+
         obj.writer = DatasetWriter(
             meta=obj.meta,
             root=obj.root,
@@ -900,7 +908,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
         encoder_queue_maxsize: int = 30,
         *,
         token: str | bool | None = None,
-    ) -> "LeRobotDataset":
+    ) -> LeRobotDataset:
         """Resume recording on an existing dataset.
 
         Loads metadata from an existing dataset (local or Hub) and creates a
@@ -982,6 +990,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
             streaming_enc = cls._build_streaming_encoder(
                 obj.meta.fps, rgb_encoder, depth_encoder, encoder_queue_maxsize, encoder_threads
             )
+        from .dataset_writer import DatasetWriter
+
         obj.writer = DatasetWriter(
             meta=obj.meta,
             root=obj.root,
